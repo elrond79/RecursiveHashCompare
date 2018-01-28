@@ -7,6 +7,11 @@ resulting file over to one, where it may be diffed.  Much faster then comparing
 over a network.
 '''
 
+
+#rootpath = r"C:\Users\paulm\.thumbnails\normal"
+#rhc_globals = runpy.run_path(r"C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py"); globals().update(rhc_globals); hasher = RecursiveHasher(rootpath, r"C:\Users\paulm\Desktop\test_hash_data.txt"); data = hasher.hash(); print(data.hash); print(data.size)
+
+
 import os
 import sys
 import argparse
@@ -24,58 +29,53 @@ FileHashData = namedtuple('FileHashData', ['hash', 'size', 'file'])
 DirHashData = namedtuple('DirHashData', ['hash', 'size', 'files', 'dirs'])
 FilesHashData = namedtuple('FilesHashData', ['hash', 'size', 'files'])
 
-class GenericHashData(object):
-    def __init__(self, rootFolder)
+
+def recursive_hash(folder, folder_stack):
+    subfiles = []
+    subfolders = []
+    for subpath in folder.iterdir():
+        if subpath.is_symlink() or subpath.is_file():
+            subfiles.append(subpath)
+        else:
+            subfolders.append(subpath)
+    subfiles.sort()
+    subfolders.sort()
+    running_hash = hashlib.md5()
+    running_size = 0
+    all_file_datas = []
+    for i, subfile in enumerate(subfiles):
+        filehash = hashlib.md5()
+        filesize = subfile.stat().st_size
+        running_size += filesize
+        filehash.update(subfile.read_bytes())
+        filehash = filehash.digest()
+        subfile_data = FileHashData(filehash, filesize, str(subfile))
+        all_file_datas.append(FileHashData)
+        running_hash.update(subfile.name.encode('utf8'))
+        running_hash.update(filehash)
+    filesHashData = FilesHashData(running_hash.digest(), running_size,
+        all_file_datas)
+
+    all_subdir_datas = []
+    for i, subfolder in enumerate(subfolders):
+        subdirdata = self.recursive_hash(subfolder, folder_stack + [folder])
+        running_hash.update(subfolder.name.encode('utf8'))
+        running_hash.update(subdirdata.hash)
+        running_size += subdirdata.size
+        all_subdir_datas.append(subdirdata)
+
+    return DirHashData(running_hash.digest(), running_size,
+        all_subdir_datas, filesHashData)
 
 
 class RecursiveHasher(object):
-    def __init__(self, rootFolder, output_path):
-        self.root_folder = Path(folder).resolve(strict=True)
+    def __init__(self, root_folder, output_path):
+        self.root_folder = Path(root_folder).resolve(strict=True)
         self.output_path = Path(output_path).resolve()
-        self.make_output_hashes()
 
-    def make_output_hashes(self):
-        with open(self.output_path, 'w') as output_handle:
-            self._recursive_hash(output_handle, self.root_folder, [])
+    def hash(self):
+        return recursive_hash(self.root_folder, [])
 
-    def _recursive_hash(self, output_handle, folder, folder_stack):
-        subfiles = []
-        subfolders = []
-        for subpath in folder.iterdir():
-            if subpath.is_symlink() or subpath.is_file():
-                subfiles.append(subpath)
-            else:
-                subfolders.append(subpath)
-        subfiles.sort()
-        subfolders.sort()
-        running_hash = hashlib.md5()
-        running_size = 0
-        all_file_datas = []
-        for i, subfile in enumerate(subfiles):
-            filehash = hashlib.md5()
-            filesize = subfile.stat().st_size
-            running_size += filesize
-            filehash.update(subfile.read_bytes())
-            filehash = fielhash.digest()
-            subfile_data = FileHashData(filehash, filesize, str(subfile))
-            all_file_datas.append(FileHashData)
-            running_hash.update(subfile.name)
-            running_hash.update(filehash)
-        filesHashData = FilesHashData(running_hash.digest(), running_size,
-            all_file_datas)
-
-        all_subdir_datas = []
-        for i, subfolder in enumerate(subfolders):
-            subdirdata = self._recursive_hash(subfolder, output_handle)
-            running_hash.update(subfolder.name)
-            running_hash.update(subdirdata.hash)
-            running_size += subdirdata.size
-            all_subdir_datas.append(subdirdata)
-
-        return DirHashData(running_hash.digest(), running_size,
-            all_subdir_datas, filesHashData)
-
-    
 
 def get_parser():
     parser = argparse.ArgumentParser(description=__doc__,
