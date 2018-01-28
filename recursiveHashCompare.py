@@ -9,7 +9,7 @@ over a network.
 
 
 #rootpath = r"C:\Users\paulm\.thumbnails\normal"
-#rhc_globals = runpy.run_path(r"C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py"); globals().update(rhc_globals); hasher = RecursiveHasher(rootpath, r"C:\Users\paulm\Desktop\test_hash_data.txt"); data = hasher.hash(); print(data.hash); print(data.size)
+#rhc_globals = runpy.run_path(r"C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py"); globals().update(rhc_globals); data = DirHashData(rootpath); print(data)
 
 
 import os
@@ -17,7 +17,7 @@ import sys
 import argparse
 import pathlib
 import hashlib
-from collections import namedtuple
+import binascii
 
 from pathlib import Path
 
@@ -25,56 +25,94 @@ SUMMARY_EXTRA = ".summary"
 SUMMARY_DEPTH_DEFAULT = 3
 
 
-FileHashData = namedtuple('FileHashData', ['hash', 'size', 'file'])
-DirHashData = namedtuple('DirHashData', ['hash', 'size', 'files', 'dirs'])
-FilesHashData = namedtuple('FilesHashData', ['hash', 'size', 'files'])
+class BaseHashData(object):
+    INDENT = ' ' * 2
+
+    def __str__(self):
+        return '\n'.join(self._strlines(0))
+
+    def hexhash(self):
+        return binascii.hexlify(self.hash).decode('ascii')
 
 
-def recursive_hash(folder, folder_stack):
-    subfiles = []
-    subfolders = []
-    for subpath in folder.iterdir():
-        if subpath.is_symlink() or subpath.is_file():
-            subfiles.append(subpath)
-        else:
-            subfolders.append(subpath)
-    subfiles.sort()
-    subfolders.sort()
-    running_hash = hashlib.md5()
-    running_size = 0
-    all_file_datas = []
-    for i, subfile in enumerate(subfiles):
+class FileHashData(BaseHashData):
+    def __init__(self, filepath):
+        if not isinstance(filepath, pathlib.Path):
+            filepath = pathlib.Path(filepath)
+        self.path = str(filepath)
+        self.size = filepath.stat().st_size
         filehash = hashlib.md5()
-        filesize = subfile.stat().st_size
-        running_size += filesize
-        filehash.update(subfile.read_bytes())
-        filehash = filehash.digest()
-        subfile_data = FileHashData(filehash, filesize, str(subfile))
-        all_file_datas.append(FileHashData)
-        running_hash.update(subfile.name.encode('utf8'))
-        running_hash.update(filehash)
-    filesHashData = FilesHashData(running_hash.digest(), running_size,
-        all_file_datas)
+        filehash.update(filepath.read_bytes())
+        self.hash = filehash.digest()         
 
-    all_subdir_datas = []
-    for i, subfolder in enumerate(subfolders):
-        subdirdata = self.recursive_hash(subfolder, folder_stack + [folder])
-        running_hash.update(subfolder.name.encode('utf8'))
-        running_hash.update(subdirdata.hash)
-        running_size += subdirdata.size
-        all_subdir_datas.append(subdirdata)
+    def _strlines(self, indent_level):
+        return ['{}{} - {:,} - {}'.format(self.INDENT * indent_level,
+            os.path.basename(self.path), self.size, self.hexhash())]
+    
 
-    return DirHashData(running_hash.digest(), running_size,
-        all_subdir_datas, filesHashData)
+class FilesHashData(BaseHashData):
+    def __init__(self, files):
+        self.files = []
+        for f in files:
+            if not isinstance(f, FileHashData):
+                f = FileHashData(f)
+            self.files.append(f)
+
+        running_hash = hashlib.md5()
+        self.size = 0
+        for filehash in self.files:
+            self.size += filehash.size
+            running_hash.update(os.path.basename(filehash.path).encode('utf8'))
+            running_hash.update(filehash.hash)
+        self.hash = running_hash.digest()
+
+    def _strlines(self, indent_level):
+        lines = ['{}<files> - {:,} - {}'.format(self.INDENT * indent_level,
+            self.size, self.hexhash())]
+        for filedata in self.files:
+            lines.extend(filedata._strlines(indent_level + 1))
+        return lines
 
 
-class RecursiveHasher(object):
-    def __init__(self, root_folder, output_path):
-        self.root_folder = Path(root_folder).resolve(strict=True)
-        self.output_path = Path(output_path).resolve()
+class DirHashData(BaseHashData):
+    def __init__(self, folderpath):
+        if not isinstance(folderpath, pathlib.Path):
+            folderpath = pathlib.Path(folderpath)
+        self.path = str(folderpath)
+        subfiles = []
+        subfolders = []
+        for subpath in folderpath.iterdir():
+            if subpath.is_symlink() or subpath.is_file():
+                subfiles.append(subpath)
+            else:
+                subfolders.append(subpath)
+        subfiles.sort()
+        subfolders.sort()
 
-    def hash(self):
-        return recursive_hash(self.root_folder, [])
+        self.size = 0
+        running_hash = hashlib.md5()
+        
+        self.files = FilesHashData(subfiles)
+
+        self.size += self.files.size
+        running_hash.update(self.files.hash)
+
+        self.dirs = []
+        for subfolder in subfolders:
+            subdirdata = type(self)(subfolder)
+            self.dirs.append(subdirdata)
+            self.size += subdirdata.size
+            running_hash.update(subfolder.name.encode('utf8'))
+            running_hash.update(subdirdata.hash)
+        self.hash = running_hash.digest()
+
+    def _strlines(self, indent_level):
+        lines = ['{}{} - {:,} - {}'.format(self.INDENT * indent_level,
+            os.path.basename(self.path), self.size, self.hexhash())]
+        for dirdata in self.dirs:
+            lines.extend(dirdata._strlines(indent_level + 1))
+        lines.extend(self.files._strlines(indent_level + 1))
+        return lines
 
 
 def get_parser():
