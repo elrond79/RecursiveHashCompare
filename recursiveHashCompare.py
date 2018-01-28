@@ -11,43 +11,69 @@ import os
 import sys
 import argparse
 import pathlib
+import hashlib
+from collections import namedtuple
 
 from pathlib import Path
 
 SUMMARY_EXTRA = ".summary"
 SUMMARY_DEPTH_DEFAULT = 3
 
+
+FileHashData = namedtuple('FileHashData', ['hash', 'size', 'file'])
+DirHashData = namedtuple('DirHashData', ['hash', 'size', 'files', 'dirs'])
+FilesHashData = namedtuple('FilesHashData', ['hash', 'size', 'files'])
+
+class GenericHashData(object):
+    def __init__(self, rootFolder)
+
+
 class RecursiveHasher(object):
     def __init__(self, rootFolder, output_path):
+        self.root_folder = Path(folder).resolve(strict=True)
+        self.output_path = Path(output_path).resolve()
+        self.make_output_hashes()
 
+    def make_output_hashes(self):
+        with open(self.output_path, 'w') as output_handle:
+            self._recursive_hash(output_handle, self.root_folder, [])
 
-def output_hashes(folder, output_path):
-    folder = Path(folder).resolve(strict=True)
-    output_path = Path(output_path).resolve()
+    def _recursive_hash(self, output_handle, folder, folder_stack):
+        subfiles = []
+        subfolders = []
+        for subpath in folder.iterdir():
+            if subpath.is_symlink() or subpath.is_file():
+                subfiles.append(subpath)
+            else:
+                subfolders.append(subpath)
+        subfiles.sort()
+        subfolders.sort()
+        running_hash = hashlib.md5()
+        running_size = 0
+        all_file_datas = []
+        for i, subfile in enumerate(subfiles):
+            filehash = hashlib.md5()
+            filesize = subfile.stat().st_size
+            running_size += filesize
+            filehash.update(subfile.read_bytes())
+            filehash = fielhash.digest()
+            subfile_data = FileHashData(filehash, filesize, str(subfile))
+            all_file_datas.append(FileHashData)
+            running_hash.update(subfile.name)
+            running_hash.update(filehash)
+        filesHashData = FilesHashData(running_hash.digest(), running_size,
+            all_file_datas)
 
-    with open(output_path, 'w') as output_handle:
-        recursive_hash(folder, output_handle, [])
+        all_subdir_datas = []
+        for i, subfolder in enumerate(subfolders):
+            subdirdata = self._recursive_hash(subfolder, output_handle)
+            running_hash.update(subfolder.name)
+            running_hash.update(subdirdata.hash)
+            running_size += subdirdata.size
+            all_subdir_datas.append(subdirdata)
 
-def recursive_hash(folder, output_handle, parent_folders):
-    hashes = []
-    subfiles = []
-    subfolders = []
-    for subpath in folder.iterdir():
-        if subpath.is_symlink() or subpath.is_file():
-            subfiles.append(subpath)
-        else:
-            subfolders.append(subpath)
-    subfiles.sort()
-    subfolders.sort()
-    # do depth first - subfolders first
-    for i, subfolder in enumerate(subfolders):
-        do
-        recursive_hash(subfolder, output_handle, summary_handle, summary_depth,
-            parent_folders + [subfolder, i, len(subfolders)])
-    for i, f in enumerate(subfiles):
-
-
-def doUpdate(folderProgress, fileNum, totalFiles):
+        return DirHashData(running_hash.digest(), running_size,
+            all_subdir_datas, filesHashData)
 
     
 
