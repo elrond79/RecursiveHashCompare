@@ -57,7 +57,7 @@ class BaseHashData(object):
     INDENT = ' ' * 2
 
     def __str__(self):
-        return '\n'.join(self._strlines(0))
+        return '\n'.join(self.strlines(0))
 
     def hexhash(self):
         return binascii.hexlify(self.hash).decode('ascii')
@@ -78,7 +78,7 @@ class FileHashData(BaseHashData):
         filehash.update(filepath.read_bytes())
         self.hash = filehash.digest()         
 
-    def _strlines(self, indent_level):
+    def strlines(self, indent_level):
         return ['{}{} - {:,} - {}'.format(self.INDENT * indent_level,
             os.path.basename(self.path), self.size, self.hexhash())]
     
@@ -103,12 +103,12 @@ class FilesHashData(BaseHashData):
             running_hash.update(filehash.hash)
         self.hash = running_hash.digest()
 
-    def _strlines(self, indent_level):
-        lines = ['{}<files> - {:,} - {}'.format(self.INDENT * indent_level,
-            self.size, self.hexhash())]
+    def strlines(self, indent_level):
+        yield '{}<files> - {:,} - {}'.format(self.INDENT * indent_level,
+            self.size, self.hexhash())
         for filedata in self.files:
-            lines.extend(filedata._strlines(indent_level + 1))
-        return lines
+            for line in filedata.strlines(indent_level + 1):
+                yield line
 
 
 class DirHashData(BaseHashData):
@@ -152,13 +152,14 @@ class DirHashData(BaseHashData):
             running_hash.update(subdirdata.hash)
         self.hash = running_hash.digest()
 
-    def _strlines(self, indent_level):
-        lines = ['{}{} - {:,} - {}'.format(self.INDENT * indent_level,
-            os.path.basename(self.path), self.size, self.hexhash())]
+    def strlines(self, indent_level):
+        yield '{}{} - {:,} - {}'.format(self.INDENT * indent_level,
+            os.path.basename(self.path), self.size, self.hexhash())
         for dirdata in self.dirs:
-            lines.extend(dirdata._strlines(indent_level + 1))
-        lines.extend(self.files._strlines(indent_level + 1))
-        return lines
+            for line in dirdata.strlines(indent_level + 1):
+                yield line
+        for line in self.files.strlines(indent_level + 1):
+            yield line
 
 
 def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL):
@@ -167,9 +168,22 @@ def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL):
     else:
         updater = None
     dirdata = DirHashData(folder, updater=updater)
-    with open(output_path, 'wb') as f:
+
+    output_base, output_ext = os.path.splitext(output_path)
+    if output_ext == '.txt':
+        output_txt = output_path
+        output_pickle = output_base + '.pickle'
+    else:
+        output_pickle = output_path
+        output_txt = output_base + '.txt'
+
+    with open(output_pickle, 'wb') as f:
         pickle.dump(dirdata, f, protocol=pickle.HIGHEST_PROTOCOL)
 
+    with open(output_txt, 'w') as f:
+        for line in dirdata.strlines(0):
+            f.write(line)
+            f.write('\n')
 
 def get_parser():
     parser = argparse.ArgumentParser(description=__doc__,
