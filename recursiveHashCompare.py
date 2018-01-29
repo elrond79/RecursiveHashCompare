@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
-'''Generate a file all the files + folders in a target folder, with their hashes
+'''Generate recursive size + hash info recursively for a target folder
 
 Designed to be run locally on two separate computers, then the copy the
-resulting file over to one, where it may be diffed.  Much faster then comparing
-over a network.
+resulting file(s) over to one, where it may be diffed.  Much faster then
+streaming entire file contents over a network for comparison.
 '''
 
 
