@@ -9,7 +9,9 @@ over a network.
 
 
 #rootpath = r"C:\Users\paulm\.thumbnails\normal"
-#rhc_globals = runpy.run_path(r"C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py"); globals().update(rhc_globals); data = DirHashData(rootpath); print(data)
+#rootpath = r"C:\Users\paulm\Desktop"
+#rhc_globals = runpy.run_path(r"C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py"); globals().update(rhc_globals); updater = Updater(); data = DirHashData(rootpath, updater=updater); print(data)
+#C:\Apps\DevTools\Python36\python.exe recursiveHashCompare.py "C:\Users\paulm\Desktop\Adobe Acrobat XI Pro 11.0.3 Multilanguage [ChingLiu]" "C:\Users\paulm\Desktop\Acrobot_hash.pickle"
 
 
 import os
@@ -18,11 +20,37 @@ import argparse
 import pathlib
 import hashlib
 import binascii
+import datetime
+import pickle
+
 
 from pathlib import Path
 
+
 SUMMARY_EXTRA = ".summary"
 SUMMARY_DEPTH_DEFAULT = 3
+DEFAULT_INTERVAL=10
+
+
+class Updater(object):
+    def __init__(self, interval=datetime.timedelta(seconds=DEFAULT_INTERVAL)):
+        self.start = datetime.datetime.now()
+        self.last = self.start
+        if not isinstance(interval, datetime.timedelta):
+            interval = datetime.timedelta(seconds=interval)
+        self.interval = interval
+
+    def update(self, current_path, dir_progress):
+        now = datetime.datetime.now()
+        if (now - self.last) >= self.interval:            
+            elapsed = now - self.start
+            progress_strs = []
+            for dir_i, num_dirs in dir_progress:
+                progress_strs.append("{}/{}".format(dir_i, num_dirs))
+            progress_str = ' - '.join(progress_strs)
+            print(current_path)
+            print(f"{elapsed} - {progress_str}")
+            self.last = now
 
 
 class BaseHashData(object):
@@ -36,9 +64,14 @@ class BaseHashData(object):
 
 
 class FileHashData(BaseHashData):
-    def __init__(self, filepath):
+    def __init__(self, filepath, updater=None, progress=None):
         if not isinstance(filepath, pathlib.Path):
             filepath = pathlib.Path(filepath)
+        if updater:
+            if not progress:
+                progress = []
+            updater.update(filepath, progress)
+
         self.path = str(filepath)
         self.size = filepath.stat().st_size
         filehash = hashlib.md5()
@@ -51,16 +84,20 @@ class FileHashData(BaseHashData):
     
 
 class FilesHashData(BaseHashData):
-    def __init__(self, files):
+    def __init__(self, files, updater=None, progress=None):
         self.files = []
-        for f in files:
-            if not isinstance(f, FileHashData):
-                f = FileHashData(f)
-            self.files.append(f)
 
         running_hash = hashlib.md5()
         self.size = 0
-        for filehash in self.files:
+        for i, filehash in enumerate(files):
+            if updater:
+                new_progress = progress + [(i + 1, len(files))]
+            else:
+                new_progress = None            
+            if not isinstance(filehash, FileHashData):
+                filehash = FileHashData(filehash, updater=updater,
+                    progress=new_progress)
+            self.files.append(filehash)
             self.size += filehash.size
             running_hash.update(os.path.basename(filehash.path).encode('utf8'))
             running_hash.update(filehash.hash)
@@ -75,9 +112,13 @@ class FilesHashData(BaseHashData):
 
 
 class DirHashData(BaseHashData):
-    def __init__(self, folderpath):
+    def __init__(self, folderpath, updater=None, progress=None):
         if not isinstance(folderpath, pathlib.Path):
             folderpath = pathlib.Path(folderpath)
+        if updater:
+            if not progress:
+                progress = []
+            updater.update(folderpath, progress)
         self.path = str(folderpath)
         subfiles = []
         subfolders = []
@@ -92,14 +133,19 @@ class DirHashData(BaseHashData):
         self.size = 0
         running_hash = hashlib.md5()
         
-        self.files = FilesHashData(subfiles)
+        self.files = FilesHashData(subfiles, updater=updater, progress=progress)
 
         self.size += self.files.size
         running_hash.update(self.files.hash)
 
         self.dirs = []
-        for subfolder in subfolders:
-            subdirdata = type(self)(subfolder)
+        for i, subfolder in enumerate(subfolders):
+            if updater:
+                new_progress = progress + [(i + 1, len(subfolders))]
+            else:
+                new_progress = None
+            subdirdata = type(self)(subfolder, updater=updater,
+                progress=new_progress)
             self.dirs.append(subdirdata)
             self.size += subdirdata.size
             running_hash.update(subfolder.name.encode('utf8'))
@@ -115,6 +161,16 @@ class DirHashData(BaseHashData):
         return lines
 
 
+def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL):
+    if interval > 0:
+        updater = Updater(interval)
+    else:
+        updater = None
+    dirdata = DirHashData(folder, updater=updater)
+    with open(output_path, 'wb') as f:
+        pickle.dump(dirdata, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
 def get_parser():
     parser = argparse.ArgumentParser(description=__doc__,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -123,14 +179,17 @@ def get_parser():
         default=".")
     parser.add_argument('output',
         help='Path to file to generate output hash information in',
-        default="md5_hashes.txt")
+        default="md5_hashes.pickle")
+    parser.add_argument('-i', '--interval', type=int, default=DEFAULT_INTERVAL,
+        help="How often to print out progress updates, in seconds; set to 0"
+            " in order to disable updates")
     return parser
+
 
 def main(args=sys.argv[1:]):
     parser = get_parser()
     args = parser.parse_args(args)
-    output_hashes(args.dir, args.output, summary_path=args.summary,
-        summary_depth=args.summary_depth)
+    write_hashes(args.dir, args.output, interval=args.interval)
 
 
 if __name__ == '__main__':
