@@ -12,7 +12,7 @@ streaming entire file contents over a network for comparison.
 #rootpath = r"C:\Users\paulm\Desktop"
 #rhc_globals = runpy.run_path(r"C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py"); globals().update(rhc_globals); updater = Updater(); data = DirHashData(rootpath, updater=updater); print(data)
 #C:\Apps\DevTools\Python36\python.exe recursiveHashCompare.py "C:\Users\paulm\Desktop\Adobe Acrobat XI Pro 11.0.3 Multilanguage [ChingLiu]" "C:\Users\paulm\Desktop\Acrobot_hash.pickle"
-
+#C:\Apps\DevTools\Python36\python.exe recursiveHashCompare.py "D:" "C:\Users\paulm\Desktop\d_drive.pickle" -i 60
 
 import os
 import sys
@@ -29,8 +29,8 @@ from pathlib import Path
 
 SUMMARY_EXTRA = ".summary"
 SUMMARY_DEPTH_DEFAULT = 3
-DEFAULT_INTERVAL=10
-
+DEFAULT_INTERVAL = 10
+DEFAULT_BUFFER_SIZE = 4096
 
 class Updater(object):
     def __init__(self, interval=datetime.timedelta(seconds=DEFAULT_INTERVAL)):
@@ -72,10 +72,21 @@ class FileHashData(BaseHashData):
                 progress = []
             updater.update(filepath, progress)
 
+        stat = filepath.stat()
         self.path = str(filepath)
-        self.size = filepath.stat().st_size
+        self.size = stat.st_size
         filehash = hashlib.md5()
-        filehash.update(filepath.read_bytes())
+
+        if hasattr(stat, 'st_blksize') and stat.st_blksize:
+            buffer_size = stat.st_blksize
+        else:
+            buffer_size = DEFAULT_BUFFER_SIZE
+        with filepath.open('rb') as f:
+            while True:
+                data = f.read(buffer_size)
+                if not data:
+                    break
+                filehash.update(data)
         self.hash = filehash.digest()         
 
     def strlines(self, indent_level):
