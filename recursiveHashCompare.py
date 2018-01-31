@@ -259,8 +259,6 @@ def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL, exclude=()):
     folder = ensure_slash_after_drive(folder)
     output_path = ensure_slash_after_drive(output_path)
 
-    dirdata = DirHashData(folder, updater=updater, exclude=exclude)
-
     output_base, output_ext = os.path.splitext(str(output_path))
     if output_ext == '.txt':
         output_txt = output_path
@@ -268,6 +266,16 @@ def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL, exclude=()):
     else:
         output_pickle = output_path
         output_txt = output_base + '.txt'
+
+    # we do a test open of both output paths to make sure they're writable
+    # before doing whole crawl!
+    with open(output_pickle, 'ab') as f:
+        pass
+
+    with open(output_txt, 'a') as f:
+        pass
+
+    dirdata = DirHashData(folder, updater=updater, exclude=exclude)
 
     with open(output_pickle, 'wb') as f:
         pickle.dump(dirdata, f, protocol=pickle.HIGHEST_PROTOCOL)
