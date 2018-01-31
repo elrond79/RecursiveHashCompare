@@ -22,7 +22,7 @@ import hashlib
 import binascii
 import datetime
 import pickle
-
+import re
 
 from pathlib import Path
 
@@ -31,6 +31,7 @@ SUMMARY_EXTRA = ".summary"
 SUMMARY_DEPTH_DEFAULT = 3
 DEFAULT_INTERVAL = 10
 DEFAULT_BUFFER_SIZE = 4096
+
 
 class Updater(object):
     def __init__(self, interval=datetime.timedelta(seconds=DEFAULT_INTERVAL)):
@@ -64,9 +65,10 @@ class BaseHashData(object):
 
 
 class FileHashData(BaseHashData):
-    def __init__(self, filepath, updater=None, progress=None):
+    def __init__(self, filepath, updater=None, progress=None, root_dir=None):
         if not isinstance(filepath, pathlib.Path):
             filepath = pathlib.Path(filepath)
+        self.root_dir = root_dir
         if updater:
             if not progress:
                 progress = []
@@ -95,7 +97,7 @@ class FileHashData(BaseHashData):
     
 
 class FilesHashData(BaseHashData):
-    def __init__(self, files, updater=None, progress=None):
+    def __init__(self, files, updater=None, progress=None, root_dir=None):
         self.files = []
 
         running_hash = hashlib.md5()
@@ -107,7 +109,7 @@ class FilesHashData(BaseHashData):
                 new_progress = None            
             if not isinstance(filehash, FileHashData):
                 filehash = FileHashData(filehash, updater=updater,
-                    progress=new_progress)
+                    progress=new_progress, root_dir=root_dir)
             self.files.append(filehash)
             self.size += filehash.size
             running_hash.update(os.path.basename(filehash.path).encode('utf8'))
@@ -123,9 +125,14 @@ class FilesHashData(BaseHashData):
 
 
 class DirHashData(BaseHashData):
-    def __init__(self, folderpath, updater=None, progress=None):
+    def __init__(self, folderpath, updater=None, progress=None, exclude=(),
+                 root_dir=None):
         if not isinstance(folderpath, pathlib.Path):
             folderpath = pathlib.Path(folderpath)
+        if root_dir is None:
+            root_dir = self
+        self.root_dir = root_dir
+        self.exclude = exclude
         if updater:
             if not progress:
                 progress = []
@@ -134,6 +141,8 @@ class DirHashData(BaseHashData):
         subfiles = []
         subfolders = []
         for subpath in folderpath.iterdir():
+            if self.is_excluded(subpath):
+                continue
             if subpath.is_symlink() or subpath.is_file():
                 subfiles.append(subpath)
             else:
@@ -144,7 +153,8 @@ class DirHashData(BaseHashData):
         self.size = 0
         running_hash = hashlib.md5()
         
-        self.files = FilesHashData(subfiles, updater=updater, progress=progress)
+        self.files = FilesHashData(subfiles, updater=updater, progress=progress,
+                                   root_dir=root_dir)
 
         self.size += self.files.size
         running_hash.update(self.files.hash)
@@ -156,12 +166,21 @@ class DirHashData(BaseHashData):
             else:
                 new_progress = None
             subdirdata = type(self)(subfolder, updater=updater,
-                progress=new_progress)
+                progress=new_progress, root_dir=root_dir)
             self.dirs.append(subdirdata)
             self.size += subdirdata.size
             running_hash.update(subfolder.name.encode('utf8'))
             running_hash.update(subdirdata.hash)
         self.hash = running_hash.digest()
+
+    def is_excluded(self, path):
+        if not self.root_dir.exclude:
+            return False
+        rel_path = str(path.relative_to(self.root_dir.path))
+        for exclusion_re in self.root_dir.exclude:
+            if exclusion_re.match(rel_path):
+                return True
+        return False
 
     def strlines(self, indent_level):
         yield '{}{} - {:,} - {}'.format(self.INDENT * indent_level,
@@ -173,14 +192,34 @@ class DirHashData(BaseHashData):
             yield line
 
 
-def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL):
+def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL, exclude=()):
     if interval > 0:
         updater = Updater(interval)
     else:
         updater = None
-    dirdata = DirHashData(folder, updater=updater)
+    if isinstance(exclude, str):
+        exclude = [exclude]
+    exclude = [x if isinstance(x, re._pattern_type)
+               else re.compile(x) for x in exclude]
 
-    output_base, output_ext = os.path.splitext(output_path)
+    def ensure_slash_after_drive(input_path):
+        '''Fix paths like E:folder to E:\folder
+
+        Note that even Path.absolute won't work here'''
+        if not isinstance(input_path, pathlib.Path):
+            input_path = pathlib.Path(input_path)
+        if not input_path.is_absolute() and input_path.drive:
+            parts = list(input_path.parts)
+            assert parts[0] == input_path.drive
+            parts[1] = os.path.sep + parts[1]
+            return type(input_path)(*parts)
+        return input_path
+    folder = ensure_slash_after_drive(folder)
+    output_path = ensure_slash_after_drive(output_path)
+
+    dirdata = DirHashData(folder, updater=updater, exclude=exclude)
+
+    output_base, output_ext = os.path.splitext(str(output_path))
     if output_ext == '.txt':
         output_txt = output_path
         output_pickle = output_base + '.pickle'
@@ -208,13 +247,17 @@ def get_parser():
     parser.add_argument('-i', '--interval', type=int, default=DEFAULT_INTERVAL,
         help="How often to print out progress updates, in seconds; set to 0"
             " in order to disable updates")
+    parser.add_argument('-e', '--exclude', action='append', default=[],
+        help="Regular expression for paths to exclude (relative to base DIR);"
+             " may be given multiple times")
     return parser
 
 
 def main(args=sys.argv[1:]):
     parser = get_parser()
     args = parser.parse_args(args)
-    write_hashes(args.dir, args.output, interval=args.interval)
+    write_hashes(args.dir, args.output, interval=args.interval,
+                 exclude=args.exclude)
 
 
 if __name__ == '__main__':
