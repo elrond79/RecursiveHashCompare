@@ -31,6 +31,7 @@ SUMMARY_EXTRA = ".summary"
 SUMMARY_DEPTH_DEFAULT = 3
 DEFAULT_INTERVAL = 10
 DEFAULT_BUFFER_SIZE = 4096
+LONGPATH_PREFIX = '\\\\?\\'
 
 
 class Updater(object):
@@ -69,9 +70,37 @@ class BaseHashData(object):
             path = pathlib.Path(path)
         if not isinstance(path, pathlib.PureWindowsPath):
             return path
-        if len(str(path)) < 256:
+        if len(str(path)) < 256 or str(path).startswith(LONGPATH_PREFIX):
             return path
-        return type(path)('\\\\?\\' + str(path))
+        return type(path)(LONGPATH_PREFIX + str(path))
+
+    def get_short_path(cls, path):
+        if not isinstance(path, pathlib.Path):
+            path = pathlib.Path(path)
+        if not isinstance(path, pathlib.PureWindowsPath):
+            return path
+        if str(path).startswith(LONGPATH_PREFIX):
+            return pathlib.Path(str(path)[len(LONGPATH_PREFIX):])
+        return path
+
+    @property
+    def path_str(self):
+        result = str(self._path)
+        if result.startswith(LONGPATH_PREFIX):
+            result = result[len(LONGPATH_PREFIX):]
+        return result
+
+    @property
+    def path_obj(self):
+        return self._path
+
+    # this is just here to block assigning to self.path
+    @property
+    def path(self):
+        raise Exception
+
+    def set_path(self, value):
+        self._path = self.get_extended_path(value)
 
 
 class FileHashData(BaseHashData):
@@ -82,10 +111,8 @@ class FileHashData(BaseHashData):
                 progress = []
             updater.update(filepath, progress)
 
-        # self.path is non-extended
-        self.path = str(filepath)
-        filepath = self.get_extended_path(filepath)
-        stat = filepath.stat()
+        self.set_path(filepath)
+        stat = self.path_obj.stat()
         self.size = stat.st_size
         filehash = hashlib.md5()
 
@@ -93,7 +120,7 @@ class FileHashData(BaseHashData):
             buffer_size = stat.st_blksize
         else:
             buffer_size = DEFAULT_BUFFER_SIZE
-        with filepath.open('rb') as f:
+        with self.path_obj.open('rb') as f:
             while True:
                 data = f.read(buffer_size)
                 if not data:
@@ -103,7 +130,7 @@ class FileHashData(BaseHashData):
 
     def strlines(self, indent_level):
         return ['{}{} - {:,} - {}'.format(self.INDENT * indent_level,
-            os.path.basename(self.path), self.size, self.hexhash())]
+            os.path.basename(self.path_str), self.size, self.hexhash())]
     
 
 class FilesHashData(BaseHashData):
@@ -122,7 +149,7 @@ class FilesHashData(BaseHashData):
                     progress=new_progress, root_dir=root_dir)
             self.files.append(filehash)
             self.size += filehash.size
-            running_hash.update(os.path.basename(filehash.path).encode('utf8'))
+            running_hash.update(os.path.basename(filehash.path_str).encode('utf8'))
             running_hash.update(filehash.hash)
         self.hash = running_hash.digest()
 
@@ -146,12 +173,11 @@ class DirHashData(BaseHashData):
                 progress = []
             updater.update(folderpath, progress)
 
-        # self.path is non-extended
-        self.path = str(folderpath)
-        folderpath = self.get_extended_path(folderpath)
+        self.set_path(folderpath)
         subfiles = []
         subfolders = []
-        for subpath in folderpath.iterdir():
+        for subpath in self.path_obj.iterdir():
+            subpath = self.get_extended_path(subpath)
             if self.is_excluded(subpath):
                 continue
             if subpath.is_symlink() or subpath.is_file():
@@ -187,7 +213,9 @@ class DirHashData(BaseHashData):
     def is_excluded(self, path):
         if not self.root_dir.exclude:
             return False
-        rel_path = str(path.relative_to(self.root_dir.path))
+        root_path = self.get_short_path(self.root_dir.path_obj)
+        path = self.get_short_path(path)
+        rel_path = str(path.relative_to(root_path))
         for exclusion_re in self.root_dir.exclude:
             if exclusion_re.match(rel_path):
                 return True
@@ -195,7 +223,7 @@ class DirHashData(BaseHashData):
 
     def strlines(self, indent_level):
         yield '{}{} - {:,} - {}'.format(self.INDENT * indent_level,
-            os.path.basename(self.path), self.size, self.hexhash())
+            os.path.basename(self.path_str), self.size, self.hexhash())
         for dirdata in self.dirs:
             for line in dirdata.strlines(indent_level + 1):
                 yield line
