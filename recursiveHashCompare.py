@@ -222,7 +222,10 @@ def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL, exclude=()):
         if not input_path.is_absolute() and input_path.drive:
             parts = list(input_path.parts)
             assert parts[0] == input_path.drive
-            parts[1] = os.path.sep + parts[1]
+            if len(parts) == 1:
+                parts.append(os.path.sep)
+            else:
+                parts[1] = os.path.sep + parts[1]
             return type(input_path)(*parts)
         return input_path
     folder = ensure_slash_after_drive(folder)
