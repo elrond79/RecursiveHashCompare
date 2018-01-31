@@ -147,7 +147,7 @@ class DirHashData(BaseHashData):
             updater.update(folderpath, progress)
 
         # self.path is non-extended
-        self.path = str(filepath)
+        self.path = str(folderpath)
         folderpath = self.get_extended_path(folderpath)
         subfiles = []
         subfolders = []
