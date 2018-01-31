@@ -63,19 +63,29 @@ class BaseHashData(object):
     def hexhash(self):
         return binascii.hexlify(self.hash).decode('ascii')
 
+    @classmethod
+    def get_extended_path(cls, path):
+        if not isinstance(path, pathlib.Path):
+            path = pathlib.Path(path)
+        if not isinstance(path, pathlib.PureWindowsPath):
+            return path
+        if len(str(path)) < 256:
+            return path
+        return type(path)('\\\\?\\' + str(path))
+
 
 class FileHashData(BaseHashData):
     def __init__(self, filepath, updater=None, progress=None, root_dir=None):
-        if not isinstance(filepath, pathlib.Path):
-            filepath = pathlib.Path(filepath)
         self.root_dir = root_dir
         if updater:
             if not progress:
                 progress = []
             updater.update(filepath, progress)
 
-        stat = filepath.stat()
+        # self.path is non-extended
         self.path = str(filepath)
+        filepath = self.get_extended_path(filepath)
+        stat = filepath.stat()
         self.size = stat.st_size
         filehash = hashlib.md5()
 
@@ -127,8 +137,6 @@ class FilesHashData(BaseHashData):
 class DirHashData(BaseHashData):
     def __init__(self, folderpath, updater=None, progress=None, exclude=(),
                  root_dir=None):
-        if not isinstance(folderpath, pathlib.Path):
-            folderpath = pathlib.Path(folderpath)
         if root_dir is None:
             root_dir = self
         self.root_dir = root_dir
@@ -137,7 +145,10 @@ class DirHashData(BaseHashData):
             if not progress:
                 progress = []
             updater.update(folderpath, progress)
-        self.path = str(folderpath)
+
+        # self.path is non-extended
+        self.path = str(filepath)
+        folderpath = self.get_extended_path(folderpath)
         subfiles = []
         subfolders = []
         for subpath in folderpath.iterdir():
