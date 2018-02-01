@@ -12,7 +12,9 @@ streaming entire file contents over a network for comparison.
 #rootpath = r"C:\Users\paulm\Desktop"
 #rhc_globals = runpy.run_path(r"C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py"); globals().update(rhc_globals); updater = Updater(); data = DirHashData(rootpath, updater=updater); print(data)
 #C:\Apps\DevTools\Python36\python.exe recursiveHashCompare.py "C:\Users\paulm\Desktop\Adobe Acrobat XI Pro 11.0.3 Multilanguage [ChingLiu]" "C:\Users\paulm\Desktop\Acrobot_hash.pickle"
-#C:\Apps\DevTools\Python36\python.exe recursiveHashCompare.py "D:" "C:\Users\paulm\Desktop\d_drive.pickle" -i 60
+#C:\Apps\DevTools\Python36\python.exe "C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "D:" "C:\Users\paulm\Desktop\d_drive.pickle" -i 60 --exclude "System Volume Information"
+#C:\Apps\DevTools\Python36\python.exe "C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "D:" "C:\Users\paulm\Desktop\d_drive.pickle" --load
+#C:\Apps\DevTools\Python36\python.exe -u "C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "D:" "C:\Users\paulm\Desktop\d_drive.pickle" --load | "C:\Apps (x86)\SysTools\UnxUtils\usr\local\wbin\tee.exe" "C:\Users\paulm\Desktop\d_drive.stdout.txt"
 
 import os
 import sys
@@ -34,6 +36,7 @@ DEFAULT_INTERVAL = 10
 DEFAULT_BUFFER_SIZE = 4096
 LONGPATH_PREFIX = '\\\\?\\'
 ERROR_HASH = binascii.a2b_hex('bad00000000000000000000000000000')
+ENCODING = 'utf8'
 
 
 class Updater(object):
@@ -159,7 +162,8 @@ class FilesHashData(BaseHashData):
                     progress=new_progress, root_dir=root_dir)
             self.files.append(filehash)
             self.size += filehash.size
-            running_hash.update(os.path.basename(filehash.path_str).encode('utf8'))
+            running_hash.update(os.path.basename(filehash.path_str)
+                                .encode(ENCODING))
             running_hash.update(filehash.hash)
         self.hash = running_hash.digest()
 
@@ -216,7 +220,7 @@ class DirHashData(BaseHashData):
                 progress=new_progress, root_dir=root_dir)
             self.dirs.append(subdirdata)
             self.size += subdirdata.size
-            running_hash.update(subfolder.name.encode('utf8'))
+            running_hash.update(subfolder.name.encode(ENCODING))
             running_hash.update(subdirdata.hash)
         self.hash = running_hash.digest()
 
@@ -245,7 +249,7 @@ class DirHashData(BaseHashData):
             yield line
 
 
-def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL, exclude=()):
+def get_dirdata(folder, interval=DEFAULT_INTERVAL, exclude=()):
     if interval > 0:
         updater = Updater(interval)
     else:
@@ -255,6 +259,12 @@ def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL, exclude=()):
     exclude = [x if isinstance(x, re._pattern_type)
                else re.compile(x) for x in exclude]
 
+    dirdata = DirHashData(folder, updater=updater, exclude=exclude)
+    return dirdata
+
+
+def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL, exclude=(),
+                 load=False):
     def ensure_slash_after_drive(input_path):
         '''Fix paths like E:folder to E:\folder
 
@@ -283,23 +293,35 @@ def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL, exclude=()):
 
     # we do a test open of both output paths to make sure they're writable
     # before doing whole crawl!
-    with open(output_pickle, 'ab') as f:
-        pass
-
     with open(output_txt, 'a') as f:
         pass
 
-    dirdata = DirHashData(folder, updater=updater, exclude=exclude)
+    if load:
+        print(f"Loading pickle from {output_pickle}...")
+        with open(output_pickle, 'rb') as f:
+            dirdata = pickle.load(f)
+        print(f"Done loading pickle from {output_pickle}!")
+    else:
+        # we do a test open of both output paths to make sure they're writable
+        # before doing whole crawl!
+        with open(output_pickle, 'ab') as f:
+            pass
 
-    with open(output_pickle, 'wb') as f:
-        pickle.dump(dirdata, f, protocol=pickle.HIGHEST_PROTOCOL)
+        print(f"Crawling directory {folder}...")
+        dirdata = get_dirdata(folder, interval=interval, exclude=exclude)
+        print(f"Done crawling directory {folder}!")
+        print(f"Writing pickle data to {output_pickle}...")
+        with open(output_pickle, 'wb') as f:
+            pickle.dump(dirdata, f, protocol=pickle.HIGHEST_PROTOCOL)
+        print(f"Done writing pickle data to {output_pickle}!")
 
-    encoding = 'utf8'
-    with open(output_txt, 'w', encoding=encoding) as f:
-        f.write(f'# -*- coding: {encoding} -*-\n\n')
+    print(f"Writing text data to {output_txt}...")
+    with open(output_txt, 'w', encoding=ENCODING) as f:
+        f.write(f'# -*- coding: {ENCODING} -*-\n\n')
         for line in dirdata.strlines(0):
             f.write(line)
             f.write('\n')
+    print(f"Done writing text data to {output_txt}!")
 
 def get_parser():
     parser = argparse.ArgumentParser(description=__doc__,
@@ -316,6 +338,10 @@ def get_parser():
     parser.add_argument('-e', '--exclude', action='append', default=[],
         help="Regular expression for paths to exclude (relative to base DIR);"
              " may be given multiple times")
+    parser.add_argument('-l', '--load', action='store_true',
+        help='If set, then instead of walking the directory and writing the'
+             ' pickled result to OUTPUT, unpickle OUTPUT and use it to write'
+             ' the text representation')
     return parser
 
 
@@ -323,7 +349,7 @@ def main(args=sys.argv[1:]):
     parser = get_parser()
     args = parser.parse_args(args)
     write_hashes(args.dir, args.output, interval=args.interval,
-                 exclude=args.exclude)
+                 exclude=args.exclude, load=args.load)
 
 
 if __name__ == '__main__':
