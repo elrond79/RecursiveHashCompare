@@ -14,7 +14,12 @@ streaming entire file contents over a network for comparison.
 #C:\Apps\DevTools\Python36\python.exe recursiveHashCompare.py "C:\Users\paulm\Desktop\Adobe Acrobat XI Pro 11.0.3 Multilanguage [ChingLiu]" "C:\Users\paulm\Desktop\Acrobot_hash.pickle"
 #C:\Apps\DevTools\Python36\python.exe "C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "D:" "C:\Users\paulm\Desktop\d_drive.pickle" -i 60 --exclude "System Volume Information"
 #C:\Apps\DevTools\Python36\python.exe "C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "D:" "C:\Users\paulm\Desktop\d_drive.pickle" --load
+
+# desktop d
 #C:\Apps\DevTools\Python36\python.exe -u "C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "D:" "C:\Users\paulm\Desktop\d_drive.pickle" --load | "C:\Apps (x86)\SysTools\UnxUtils\usr\local\wbin\tee.exe" "C:\Users\paulm\Desktop\d_drive.stdout.txt"
+
+# HTPC e
+#C:\Apps\Dev\Python36\python.exe -u "C:\Users\elrond\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "E:" "C:\Users\elrond\Desktop\e_drive.pickle"  -i 60 --exclude "System Volume Information" --exclude "\$RECYCLE.BIN" --exclude "dbc507b1a818424ae9bede9f" --exclude "msdownld\.tmp" --exclude "\.DS_Store" | "C:\Apps (x86)\SysTools\UnxUtils\usr\local\wbin\tee.exe" "C:\Users\elrond\Desktop\e_drive.stdout.txt"
 
 import os
 import sys
