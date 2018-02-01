@@ -23,6 +23,7 @@ import binascii
 import datetime
 import pickle
 import re
+import traceback
 
 from pathlib import Path
 
@@ -32,6 +33,7 @@ SUMMARY_DEPTH_DEFAULT = 3
 DEFAULT_INTERVAL = 10
 DEFAULT_BUFFER_SIZE = 4096
 LONGPATH_PREFIX = '\\\\?\\'
+ERROR_HASH = binascii.a2b_hex('bad00000000000000000000000000000')
 
 
 class Updater(object):
@@ -106,6 +108,7 @@ class BaseHashData(object):
 class FileHashData(BaseHashData):
     def __init__(self, filepath, updater=None, progress=None, root_dir=None):
         self.root_dir = root_dir
+        self.error = None
         if updater:
             if not progress:
                 progress = []
@@ -120,13 +123,20 @@ class FileHashData(BaseHashData):
             buffer_size = stat.st_blksize
         else:
             buffer_size = DEFAULT_BUFFER_SIZE
-        with self.path_obj.open('rb') as f:
-            while True:
-                data = f.read(buffer_size)
-                if not data:
-                    break
-                filehash.update(data)
-        self.hash = filehash.digest()         
+        try:
+            with self.path_obj.open('rb') as f:
+                while True:
+                    data = f.read(buffer_size)
+                    if not data:
+                        break
+                    filehash.update(data)
+        except Exception as e:
+            self.error = e
+            self.hash = ERROR_HASH
+            print("Error reading {self.path_str}:")
+            traceback.print_exc()
+        else:
+            self.hash = filehash.digest()
 
     def strlines(self, indent_level):
         return ['{}{} - {:,} - {}'.format(self.INDENT * indent_level,
@@ -222,8 +232,12 @@ class DirHashData(BaseHashData):
         return False
 
     def strlines(self, indent_level):
+        if self.root_dir is self:
+            pathname = self.path_str
+        else:
+            pathname = os.path.basename(self.path_str)
         yield '{}{} - {:,} - {}'.format(self.INDENT * indent_level,
-            os.path.basename(self.path_str), self.size, self.hexhash())
+            pathname, self.size, self.hexhash())
         for dirdata in self.dirs:
             for line in dirdata.strlines(indent_level + 1):
                 yield line
@@ -280,7 +294,9 @@ def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL, exclude=()):
     with open(output_pickle, 'wb') as f:
         pickle.dump(dirdata, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    with open(output_txt, 'w') as f:
+    encoding = 'utf8'
+    with open(output_txt, 'w', encoding=encoding) as f:
+        f.write(f'# -*- coding: {encoding} -*-\n\n')
         for line in dirdata.strlines(0):
             f.write(line)
             f.write('\n')
