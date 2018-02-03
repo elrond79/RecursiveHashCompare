@@ -11,15 +11,15 @@ streaming entire file contents over a network for comparison.
 #rootpath = r"C:\Users\paulm\.thumbnails\normal"
 #rootpath = r"C:\Users\paulm\Desktop"
 #rhc_globals = runpy.run_path(r"C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py"); globals().update(rhc_globals); updater = Updater(); data = DirHashData(rootpath, updater=updater); print(data)
-#C:\Apps\DevTools\Python36\python.exe recursiveHashCompare.py "C:\Users\paulm\Desktop\Adobe Acrobat XI Pro 11.0.3 Multilanguage [ChingLiu]" "C:\Users\paulm\Desktop\Acrobot_hash.pickle"
-#C:\Apps\DevTools\Python36\python.exe "C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "D:" "C:\Users\paulm\Desktop\d_drive.pickle" -i 60 --exclude "System Volume Information"
-#C:\Apps\DevTools\Python36\python.exe "C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "D:" "C:\Users\paulm\Desktop\d_drive.pickle" --load
 
-# desktop d
-#C:\Apps\DevTools\Python36\python.exe -u "C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "D:" "C:\Users\paulm\Desktop\d_drive.pickle" --load | "C:\Apps (x86)\SysTools\UnxUtils\usr\local\wbin\tee.exe" "C:\Users\paulm\Desktop\d_drive.stdout.txt"
+# Example of loading from already-made pickle
+#C:\Apps\DevTools\Python36\python.exe -u "C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "D:" "C:\Users\paulm\Desktop\d_drive" --load | "C:\Apps (x86)\SysTools\UnxUtils\usr\local\wbin\tee.exe" "C:\Users\paulm\Desktop\d_drive.stdout.txt"
+
+# Desktop d
+#C:\Apps\DevTools\Python36\python.exe -u "C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py" --add-date "D:" "C:\Users\paulm\Desktop\d_drive" -i 60 --exclude "System Volume Information" | "C:\Apps (x86)\SysTools\UnxUtils\usr\local\wbin\tee.exe" "C:\Users\paulm\Desktop\d_drive.stdout.txt"
 
 # HTPC e
-#C:\Apps\Dev\Python36\python.exe -u "C:\Users\elrond\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "E:" "C:\Users\elrond\Desktop\e_drive.pickle"  -i 60 --exclude "System Volume Information" --exclude "\$RECYCLE.BIN" --exclude "dbc507b1a818424ae9bede9f" --exclude "msdownld\.tmp" --exclude "\.DS_Store" | "C:\Apps (x86)\SysTools\UnxUtils\usr\local\wbin\tee.exe" "C:\Users\elrond\Desktop\e_drive.stdout.txt"
+#C:\Apps\Dev\Python36\python.exe -u "C:\Users\elrond\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "E:" --add-date "C:\Users\elrond\Desktop\e_drive"  -i 60 --exclude "System Volume Information" --exclude "\$RECYCLE.BIN" --exclude "dbc507b1a818424ae9bede9f" --exclude "msdownld\.tmp" --exclude "\.DS_Store" | "C:\Apps (x86)\SysTools\UnxUtils\usr\local\wbin\tee.exe" "C:\Users\elrond\Desktop\e_drive.stdout.txt"
 
 import os
 import sys
@@ -268,8 +268,8 @@ def get_dirdata(folder, interval=DEFAULT_INTERVAL, exclude=()):
     return dirdata
 
 
-def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL, exclude=(),
-                 load=False):
+def write_hashes(folder, output_base, interval=DEFAULT_INTERVAL, exclude=(),
+                 load=False, add_date=False):
     def ensure_slash_after_drive(input_path):
         '''Fix paths like E:folder to E:\folder
 
@@ -286,15 +286,12 @@ def write_hashes(folder, output_path, interval=DEFAULT_INTERVAL, exclude=(),
             return type(input_path)(*parts)
         return input_path
     folder = ensure_slash_after_drive(folder)
-    output_path = ensure_slash_after_drive(output_path)
+    output_base = str(ensure_slash_after_drive(output_base))
 
-    output_base, output_ext = os.path.splitext(str(output_path))
-    if output_ext == '.txt':
-        output_txt = output_path
-        output_pickle = output_base + '.pickle'
-    else:
-        output_pickle = output_path
-        output_txt = output_base + '.txt'
+    if add_date:
+        output_base += datetime.date.today().strftime('.%Y-%m-%d')
+    output_txt = output_base + '.txt'
+    output_pickle = output_base + '.pickle'
 
     # we do a test open of both output paths to make sure they're writable
     # before doing whole crawl!
@@ -335,8 +332,10 @@ def get_parser():
         help='Directory to generate hash for - default to current directory',
         default=".")
     parser.add_argument('output',
-        help='Path to file to generate output hash information in',
-        default="md5_hashes.pickle")
+        help='Path, without extension, to file to generate output hash'
+             ' information in; two files will be made with this base filename,'
+             ' one with ".pickle" added, and one with ".txt" added',
+        default="md5_hashes")
     parser.add_argument('-i', '--interval', type=int, default=DEFAULT_INTERVAL,
         help="How often to print out progress updates, in seconds; set to 0"
             " in order to disable updates")
@@ -347,6 +346,9 @@ def get_parser():
         help='If set, then instead of walking the directory and writing the'
              ' pickled result to OUTPUT, unpickle OUTPUT and use it to write'
              ' the text representation')
+    parser.add_argument('-d', '--add-date', action='store_true',
+        help='If set, then a date string will be added to the end of the OUTPUT'
+             ' filename given (before the extension)')
     return parser
 
 
@@ -354,7 +356,7 @@ def main(args=sys.argv[1:]):
     parser = get_parser()
     args = parser.parse_args(args)
     write_hashes(args.dir, args.output, interval=args.interval,
-                 exclude=args.exclude, load=args.load)
+                 exclude=args.exclude, load=args.load, add_date=args.add_date)
 
 
 if __name__ == '__main__':
