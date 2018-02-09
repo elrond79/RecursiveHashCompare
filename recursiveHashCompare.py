@@ -117,21 +117,24 @@ class FileHashData(BaseHashData):
     def __init__(self, filepath, updater=None, progress=None, root_dir=None):
         self.root_dir = root_dir
         self.error = None
-        if updater:
-            if not progress:
-                progress = []
-            updater.update(filepath, progress)
-
-        self.set_path(filepath)
-        stat = self.path_obj.stat()
-        self.size = stat.st_size
-        filehash = hashlib.md5()
-
-        if hasattr(stat, 'st_blksize') and stat.st_blksize:
-            buffer_size = stat.st_blksize
-        else:
-            buffer_size = DEFAULT_BUFFER_SIZE
+        self.hash = None
+        self.size = 0
         try:
+            if updater:
+                if not progress:
+                    progress = []
+                updater.update(filepath, progress)
+
+            self.set_path(filepath)
+            stat = self.path_obj.stat()
+
+            self.size = stat.st_size
+            filehash = hashlib.md5()
+
+            if hasattr(stat, 'st_blksize') and stat.st_blksize:
+                buffer_size = stat.st_blksize
+            else:
+                buffer_size = DEFAULT_BUFFER_SIZE
             with self.path_obj.open('rb') as f:
                 while True:
                     data = f.read(buffer_size)
