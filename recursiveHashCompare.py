@@ -113,6 +113,14 @@ class BaseHashData(object):
         self._path = self.get_extended_path(value)
 
 
+    def relpath(self, subpath=None):
+        if subpath is None:
+            subpath = self.path_obj
+        root_path = self.get_short_path(self.root_dir.path_obj)
+        path = self.get_short_path(subpath)
+        return str(path.relative_to(root_path))
+
+
 class FileHashData(BaseHashData):
     def __init__(self, filepath, updater=None, progress=None, root_dir=None):
         self.root_dir = root_dir
@@ -152,7 +160,7 @@ class FileHashData(BaseHashData):
     def strlines(self, indent_level):
         return ['{}{} - {:,} - {}'.format(self.INDENT * indent_level,
             os.path.basename(self.path_str), self.size, self.hexhash())]
-    
+
 
 class FilesHashData(BaseHashData):
     def __init__(self, files, updater=None, progress=None, root_dir=None):
@@ -235,9 +243,7 @@ class DirHashData(BaseHashData):
     def is_excluded(self, path):
         if not self.root_dir.exclude:
             return False
-        root_path = self.get_short_path(self.root_dir.path_obj)
-        path = self.get_short_path(path)
-        rel_path = str(path.relative_to(root_path))
+        rel_path = self.relpath(path)
         for exclusion_re in self.root_dir.exclude:
             if exclusion_re.match(rel_path):
                 return True
@@ -247,14 +253,14 @@ class DirHashData(BaseHashData):
         if self.root_dir is self:
             pathname = self.path_str
         else:
-            pathname = os.path.basename(self.path_str)
+            pathname = self.relpath()
         yield '{}{} - {:,} - {}'.format(self.INDENT * indent_level,
             pathname, self.size, self.hexhash())
+        for line in self.files.strlines(indent_level + 1):
+            yield line
         for dirdata in self.dirs:
             for line in dirdata.strlines(indent_level + 1):
                 yield line
-        for line in self.files.strlines(indent_level + 1):
-            yield line
 
 
 def get_dirdata(folder, interval=DEFAULT_INTERVAL, exclude=()):
