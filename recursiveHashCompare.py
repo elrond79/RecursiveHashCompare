@@ -304,8 +304,10 @@ def write_hashes(folder, output_txt, interval=DEFAULT_INTERVAL, exclude=(),
         pass
 
     print(f"Crawling directory {folder}...")
+    start = datetime.datetime.now()
     dirdata = get_dirdata(folder, interval=interval, exclude=exclude)
-    print(f"Done crawling directory {folder}!")
+    elapsed = datetime.datetime.now() - start
+    print(f"Done crawling directory {folder}! (took {elapsed})")
 
     print(f"Writing text data to {output_txt}...")
     with open(output_txt, 'w', encoding=ENCODING) as f:
