@@ -7,7 +7,6 @@ resulting file(s) over to one, where it may be diffed.  Much faster then
 streaming entire file contents over a network for comparison.
 '''
 
-
 #rootpath = r"C:\Users\paulm\.thumbnails\normal"
 #rootpath = r"C:\Users\paulm\Desktop"
 #rhc_globals = runpy.run_path(r"C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py"); globals().update(rhc_globals); updater = Updater(); data = DirHashData(rootpath, updater=updater); print(data)
@@ -27,8 +26,13 @@ import pathlib
 import re
 import sys
 import traceback
+import signal
 
 from pathlib import Path
+
+import gevent.monkey
+gevent.monkey.patch_all()
+from gevent.pool import Pool
 
 
 SUMMARY_EXTRA = ".summary"
@@ -38,6 +42,7 @@ DEFAULT_BUFFER_SIZE = 4096
 LONGPATH_PREFIX = '\\\\?\\'
 ERROR_HASH = binascii.a2b_hex('bad00000000000000000000000000000')
 ENCODING = 'utf8'
+DEFAULT_THREADS = 200
 
 
 class Updater(object):
@@ -48,17 +53,14 @@ class Updater(object):
             interval = datetime.timedelta(seconds=interval)
         self.interval = interval
 
-    def update(self, current_path, dir_progress):
-        now = datetime.datetime.now()
-        if (now - self.last) >= self.interval:            
-            elapsed = now - self.start
-            progress_strs = []
-            for dir_i, num_dirs in dir_progress:
-                progress_strs.append("{}/{}".format(dir_i, num_dirs))
-            progress_str = ' - '.join(progress_strs)
-            print(current_path)
-            print(f"{elapsed} - {progress_str}")
-            self.last = now
+    def update_progress(self, *args, **kwargs):
+        pass
+
+    def start_updates(self):
+        pass
+
+    def end_updates(self):
+        pass
 
 
 class BaseHashData(object):
@@ -118,17 +120,12 @@ class BaseHashData(object):
 
 
 class FileHashData(BaseHashData):
-    def __init__(self, filepath, updater=None, progress=None, root_dir=None):
+    def __init__(self, filepath, updater=None, root_dir=None):
         self.root_dir = root_dir
         self.error = None
         self.hash = None
         self.size = 0
         try:
-            if updater:
-                if not progress:
-                    progress = []
-                updater.update(filepath, progress)
-
             self.set_path(filepath)
             stat = self.path_obj.stat()
 
@@ -159,24 +156,21 @@ class FileHashData(BaseHashData):
 
 
 class FilesHashData(BaseHashData):
-    def __init__(self, files, updater=None, progress=None, root_dir=None):
+    def __init__(self, files, updater=None, root_dir=None):
         self.files = []
 
         running_hash = hashlib.md5()
         self.size = 0
         for i, filehash in enumerate(files):
-            if updater:
-                new_progress = progress + [(i + 1, len(files))]
-            else:
-                new_progress = None            
             if not isinstance(filehash, FileHashData):
                 filehash = FileHashData(filehash, updater=updater,
-                    progress=new_progress, root_dir=root_dir)
+                                        root_dir=root_dir)
             self.files.append(filehash)
             self.size += filehash.size
             running_hash.update(os.path.basename(filehash.path_str)
                                 .encode(ENCODING))
             running_hash.update(filehash.hash)
+
         self.hash = running_hash.digest()
 
     def strlines(self, indent_level):
@@ -188,17 +182,12 @@ class FilesHashData(BaseHashData):
 
 
 class DirHashData(BaseHashData):
-    def __init__(self, folderpath, updater=None, progress=None, exclude=(),
+    def __init__(self, folderpath, pool, updater=None, exclude=(),
                  root_dir=None):
         if root_dir is None:
             root_dir = self
         self.root_dir = root_dir
         self.exclude = exclude
-        if updater:
-            if not progress:
-                progress = []
-            updater.update(folderpath, progress)
-
         self.set_path(folderpath)
         subfiles = []
         subfolders = []
@@ -211,28 +200,24 @@ class DirHashData(BaseHashData):
             else:
                 subfolders.append(subpath)
         subfiles.sort()
-        subfolders.sort()
 
         self.size = 0
         running_hash = hashlib.md5()
-        
-        self.files = FilesHashData(subfiles, updater=updater, progress=progress,
-                                   root_dir=root_dir)
+
+        self.files = FilesHashData(subfiles, updater=updater, root_dir=root_dir)
 
         self.size += self.files.size
         running_hash.update(self.files.hash)
 
-        self.dirs = []
-        for i, subfolder in enumerate(subfolders):
-            if updater:
-                new_progress = progress + [(i + 1, len(subfolders))]
-            else:
-                new_progress = None
-            subdirdata = type(self)(subfolder, updater=updater,
-                progress=new_progress, root_dir=root_dir)
-            self.dirs.append(subdirdata)
+        def make_DirHashData(subfolder):
+            return type(self)(subfolder, pool, updater=updater,
+                              root_dir=root_dir)
+        self.dirs = list(pool.imap_unordered(make_DirHashData, subfolders))
+        self.dirs.sort(key=lambda x: x.path_str)
+
+        for subdirdata in self.dirs:
             self.size += subdirdata.size
-            running_hash.update(subfolder.name.encode(ENCODING))
+            running_hash.update(subdirdata.path_obj.name.encode(ENCODING))
             running_hash.update(subdirdata.hash)
         self.hash = running_hash.digest()
 
@@ -259,7 +244,8 @@ class DirHashData(BaseHashData):
                 yield line
 
 
-def get_dirdata(folder, interval=DEFAULT_INTERVAL, exclude=()):
+def get_dirdata(folder, interval=DEFAULT_INTERVAL, exclude=(),
+                num_threads=DEFAULT_THREADS):
     if interval > 0:
         updater = Updater(interval)
     else:
@@ -269,12 +255,13 @@ def get_dirdata(folder, interval=DEFAULT_INTERVAL, exclude=()):
     exclude = [x if isinstance(x, re._pattern_type)
                else re.compile(x) for x in exclude]
 
-    dirdata = DirHashData(folder, updater=updater, exclude=exclude)
+    pool = Pool(num_threads)
+    dirdata = DirHashData(folder, pool, updater=updater, exclude=exclude)
     return dirdata
 
 
 def write_hashes(folder, output_txt, interval=DEFAULT_INTERVAL, exclude=(),
-                 add_date=False):
+                 add_date=False, num_threads=DEFAULT_THREADS):
     def ensure_slash_after_drive(input_path):
         '''Fix paths like E:folder to E:\folder
 
@@ -305,7 +292,8 @@ def write_hashes(folder, output_txt, interval=DEFAULT_INTERVAL, exclude=(),
 
     print(f"Crawling directory {folder}...")
     start = datetime.datetime.now()
-    dirdata = get_dirdata(folder, interval=interval, exclude=exclude)
+    dirdata = get_dirdata(folder, interval=interval, exclude=exclude,
+                          num_threads=num_threads)
     elapsed = datetime.datetime.now() - start
     print(f"Done crawling directory {folder}! (took {elapsed})")
 
@@ -316,6 +304,7 @@ def write_hashes(folder, output_txt, interval=DEFAULT_INTERVAL, exclude=(),
             f.write(line)
             f.write('\n')
     print(f"Done writing text data to {output_txt}!")
+
 
 def get_parser():
     parser = argparse.ArgumentParser(description=__doc__,
@@ -335,6 +324,8 @@ def get_parser():
     parser.add_argument('-d', '--add-date', action='store_true',
         help='If set, then a date string will be added to the end of the OUTPUT'
              ' filename given (before the extension)')
+    parser.add_argument('-t', '--threads', default=DEFAULT_THREADS, type=int,
+        help='Number of concurrent tasks to run')
     return parser
 
 
@@ -342,7 +333,8 @@ def main(args=sys.argv[1:]):
     parser = get_parser()
     args = parser.parse_args(args)
     write_hashes(args.dir, args.output, interval=args.interval,
-                 exclude=args.exclude, add_date=args.add_date)
+                 exclude=args.exclude, add_date=args.add_date,
+                 num_threads=args.threads)
 
 
 if __name__ == '__main__':
