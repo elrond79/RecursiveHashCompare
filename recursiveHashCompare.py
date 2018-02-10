@@ -12,9 +12,6 @@ streaming entire file contents over a network for comparison.
 #rootpath = r"C:\Users\paulm\Desktop"
 #rhc_globals = runpy.run_path(r"C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py"); globals().update(rhc_globals); updater = Updater(); data = DirHashData(rootpath, updater=updater); print(data)
 
-# Example of loading from already-made pickle
-#C:\Apps\DevTools\Python36\python.exe -u "C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "D:" "C:\Users\paulm\Desktop\d_drive" --load | "C:\Apps (x86)\SysTools\UnxUtils\usr\local\wbin\tee.exe" "C:\Users\paulm\Desktop\d_drive.stdout.txt"
-
 # Desktop d
 #C:\Apps\DevTools\Python36\python.exe -u "C:\Users\paulm\Desktop\RecursiveHashCompare\recursiveHashCompare.py" --add-date "D:" "C:\Users\paulm\Desktop\d_drive" -i 60 --exclude "System Volume Information" | "C:\Apps (x86)\SysTools\UnxUtils\usr\local\wbin\tee.exe" "C:\Users\paulm\Desktop\d_drive.stdout.txt"
 
@@ -28,7 +25,6 @@ import pathlib
 import hashlib
 import binascii
 import datetime
-import pickle
 import re
 import traceback
 
@@ -277,8 +273,8 @@ def get_dirdata(folder, interval=DEFAULT_INTERVAL, exclude=()):
     return dirdata
 
 
-def write_hashes(folder, output_base, interval=DEFAULT_INTERVAL, exclude=(),
-                 load=False, add_date=False):
+def write_hashes(folder, output_txt, interval=DEFAULT_INTERVAL, exclude=(),
+                 add_date=False):
     def ensure_slash_after_drive(input_path):
         '''Fix paths like E:folder to E:\folder
 
@@ -295,36 +291,21 @@ def write_hashes(folder, output_base, interval=DEFAULT_INTERVAL, exclude=(),
             return type(input_path)(*parts)
         return input_path
     folder = ensure_slash_after_drive(folder)
-    output_base = str(ensure_slash_after_drive(output_base))
+    output_txt = str(ensure_slash_after_drive(output_txt))
 
     if add_date:
-        output_base += datetime.date.today().strftime('.%Y-%m-%d')
-    output_txt = output_base + '.txt'
-    output_pickle = output_base + '.pickle'
+        output_base, output_ext = os.path.splitext(output_txt)
+        output_txt = output_base + datetime.date.today().strftime('.%Y-%m-%d') \
+            + output_ext
 
     # we do a test open of both output paths to make sure they're writable
     # before doing whole crawl!
     with open(output_txt, 'a') as f:
         pass
 
-    if load:
-        print(f"Loading pickle from {output_pickle}...")
-        with open(output_pickle, 'rb') as f:
-            dirdata = pickle.load(f)
-        print(f"Done loading pickle from {output_pickle}!")
-    else:
-        # we do a test open of both output paths to make sure they're writable
-        # before doing whole crawl!
-        with open(output_pickle, 'ab') as f:
-            pass
-
-        print(f"Crawling directory {folder}...")
-        dirdata = get_dirdata(folder, interval=interval, exclude=exclude)
-        print(f"Done crawling directory {folder}!")
-        print(f"Writing pickle data to {output_pickle}...")
-        with open(output_pickle, 'wb') as f:
-            pickle.dump(dirdata, f, protocol=pickle.HIGHEST_PROTOCOL)
-        print(f"Done writing pickle data to {output_pickle}!")
+    print(f"Crawling directory {folder}...")
+    dirdata = get_dirdata(folder, interval=interval, exclude=exclude)
+    print(f"Done crawling directory {folder}!")
 
     print(f"Writing text data to {output_txt}...")
     with open(output_txt, 'w', encoding=ENCODING) as f:
@@ -341,9 +322,7 @@ def get_parser():
         help='Directory to generate hash for - default to current directory',
         default=".")
     parser.add_argument('output',
-        help='Path, without extension, to file to generate output hash'
-             ' information in; two files will be made with this base filename,'
-             ' one with ".pickle" added, and one with ".txt" added',
+        help='Path to output text file to generate output hash information in',
         default="md5_hashes")
     parser.add_argument('-i', '--interval', type=int, default=DEFAULT_INTERVAL,
         help="How often to print out progress updates, in seconds; set to 0"
@@ -351,10 +330,6 @@ def get_parser():
     parser.add_argument('-e', '--exclude', action='append', default=[],
         help="Regular expression for paths to exclude (relative to base DIR);"
              " may be given multiple times")
-    parser.add_argument('-l', '--load', action='store_true',
-        help='If set, then instead of walking the directory and writing the'
-             ' pickled result to OUTPUT, unpickle OUTPUT and use it to write'
-             ' the text representation')
     parser.add_argument('-d', '--add-date', action='store_true',
         help='If set, then a date string will be added to the end of the OUTPUT'
              ' filename given (before the extension)')
@@ -365,7 +340,7 @@ def main(args=sys.argv[1:]):
     parser = get_parser()
     args = parser.parse_args(args)
     write_hashes(args.dir, args.output, interval=args.interval,
-                 exclude=args.exclude, load=args.load, add_date=args.add_date)
+                 exclude=args.exclude, add_date=args.add_date)
 
 
 if __name__ == '__main__':
