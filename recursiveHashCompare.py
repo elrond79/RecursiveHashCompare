@@ -18,14 +18,14 @@ streaming entire file contents over a network for comparison.
 # HTPC e
 #C:\Apps\Dev\Python36\python.exe -u "C:\Users\elrond\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "E:" --add-date "C:\Users\elrond\Desktop\e_drive"  -i 60 --exclude "System Volume Information" --exclude "\$RECYCLE.BIN" --exclude "dbc507b1a818424ae9bede9f" --exclude "msdownld\.tmp" --exclude "\.DS_Store" | "C:\Apps (x86)\SysTools\UnxUtils\usr\local\wbin\tee.exe" "C:\Users\elrond\Desktop\e_drive.stdout.txt"
 
-import os
-import sys
 import argparse
-import pathlib
-import hashlib
 import binascii
 import datetime
+import hashlib
+import os
+import pathlib
 import re
+import sys
 import traceback
 
 from pathlib import Path
