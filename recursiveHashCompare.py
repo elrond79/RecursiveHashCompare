@@ -17,6 +17,16 @@ streaming entire file contents over a network for comparison.
 # HTPC e
 #C:\Apps\Dev\Python36\python.exe -u "C:\Users\elrond\Desktop\RecursiveHashCompare\recursiveHashCompare.py" "E:" --add-date "C:\Users\elrond\Desktop\e_drive"  -i 60 --exclude "System Volume Information" --exclude "\$RECYCLE.BIN" --exclude "dbc507b1a818424ae9bede9f" --exclude "msdownld\.tmp" --exclude "\.DS_Store" | "C:\Apps (x86)\SysTools\UnxUtils\usr\local\wbin\tee.exe" "C:\Users\elrond\Desktop\e_drive.stdout.txt"
 
+# test - takes ~?? seconds single-threaded
+#C:\Apps\DevTools\Python36\python.exe -u "D:\Dev\Projects\RecursiveHashCompare\recursiveHashCompare.py" D:\Dev\Projects\__Archive\3D D:\devProjectsArchive3D.txt -i 1
+
+# test - takes ~15 seconds single-threaded
+#C:\Apps\DevTools\Python36\python.exe -u "D:\Dev\Projects\RecursiveHashCompare\recursiveHashCompare.py" D:\Dev\Projects\__Archive D:\devProjectsArchive.txt -i 1
+
+# test - takes ~?? seconds single-threaded
+#C:\Apps\DevTools\Python36\python.exe -u "D:\Dev\Projects\RecursiveHashCompare\recursiveHashCompare.py" D:\Dev\Projects\ D:\devProjects.txt -i 1
+
+
 import argparse
 import binascii
 import datetime
@@ -33,6 +43,8 @@ from pathlib import Path
 import gevent.monkey
 gevent.monkey.patch_all()
 from gevent.pool import Pool
+from gevent.queue import Queue, Empty
+from gevent.lock import BoundedSemaphore
 
 
 SUMMARY_EXTRA = ".summary"
@@ -61,6 +73,43 @@ class Updater(object):
 
     def end_updates(self):
         pass
+
+class DirQueueItem(object):
+    def __init__(self, folder, parent):
+        # print(f"DirQueueItem({folder!r}")
+        self.folder = folder
+        self.parent = parent
+        self.dirHashData = None
+        self.results = None
+        self.numResults = None
+        self.resultsLock = None
+
+    def setNumResults(self, numResults):
+        self.numResults = numResults
+        self.resultsLock = BoundedSemaphore()
+        self.results = []
+
+    def addResult(self, result):
+        '''Add a result on this directory's result list, and return a bool
+        indicating whether all results have been added'''
+        self.resultsLock.acquire()
+        try:
+            self.results.append(result)
+            return len(self.results) == self.numResults
+        finally:
+            self.resultsLock.release()
+
+    def isDone(self):
+        # only needed by the top-level entry, created in start_dir_crawl - all
+        # other DirQueueItems will know they're done because a child will
+        # call addResult on it's parent, and get a non-None result back
+        if self.resultsLock is None:
+            return False
+        self.resultsLock.acquire()
+        try:
+            return len(self.results) == self.numResults
+        finally:
+            self.resultsLock.release()
 
 
 class BaseHashData(object):
@@ -121,6 +170,8 @@ class BaseHashData(object):
 
 class FileHashData(BaseHashData):
     def __init__(self, filepath, updater=None, root_dir=None):
+#        print(f"FileHashData({filepath!r}")
+
         self.root_dir = root_dir
         self.error = None
         self.hash = None
@@ -182,13 +233,15 @@ class FilesHashData(BaseHashData):
 
 
 class DirHashData(BaseHashData):
-    def __init__(self, folderpath, pool, updater=None, exclude=(),
+    def __init__(self, dirQueueItem, dirQueue, updater=None, exclude=None,
                  root_dir=None):
-        if root_dir is None:
-            root_dir = self
-        self.root_dir = root_dir
+        if dirQueueItem.parent is None:
+            self.root_dir = self
+        else:
+            self.root_dir = dirQueueItem.parent.dirHashData.root_dir
         self.exclude = exclude
-        self.set_path(folderpath)
+        self.set_path(dirQueueItem.folder)
+        dirQueueItem.dirHashData = self
         subfiles = []
         subfolders = []
         for subpath in self.path_obj.iterdir():
@@ -202,24 +255,37 @@ class DirHashData(BaseHashData):
         subfiles.sort()
 
         self.size = 0
-        running_hash = hashlib.md5()
+        self.running_hash = hashlib.md5()
 
         self.files = FilesHashData(subfiles, updater=updater, root_dir=root_dir)
 
         self.size += self.files.size
-        running_hash.update(self.files.hash)
+        self.running_hash.update(self.files.hash)
 
-        def make_DirHashData(subfolder):
-            return type(self)(subfolder, pool, updater=updater,
-                              root_dir=root_dir)
-        self.dirs = list(pool.imap_unordered(make_DirHashData, subfolders))
+        dirQueueItem.setNumResults(len(subfolders))
+        if subfolders:
+            for subfolder in subfolders:
+                dirQueue.put(DirQueueItem(subfolder, dirQueueItem))
+        else:
+            self.finishHashing(dirQueueItem)
+
+    def finishHashing(self, dirQueueItem):
+        # we should only be called if dirQueueItem is good to go
+        assert(len(dirQueueItem.results) == dirQueueItem.numResults)
+
+        self.dirs = dirQueueItem.results
         self.dirs.sort(key=lambda x: x.path_str)
 
         for subdirdata in self.dirs:
             self.size += subdirdata.size
-            running_hash.update(subdirdata.path_obj.name.encode(ENCODING))
-            running_hash.update(subdirdata.hash)
-        self.hash = running_hash.digest()
+            self.running_hash.update(subdirdata.path_obj.name.encode(ENCODING))
+            self.running_hash.update(subdirdata.hash)
+        self.hash = self.running_hash.digest()
+        del self.running_hash
+
+        if (dirQueueItem.parent is not None):
+            if (dirQueueItem.parent.addResult(self)):
+                dirQueueItem.parent.dirHashData.finishHashing(dirQueueItem.parent)
 
     def is_excluded(self, path):
         if not self.root_dir.exclude:
@@ -244,20 +310,35 @@ class DirHashData(BaseHashData):
                 yield line
 
 
-def get_dirdata(folder, interval=DEFAULT_INTERVAL, exclude=(),
-                num_threads=DEFAULT_THREADS):
+def start_dir_crawl(folder, interval=DEFAULT_INTERVAL, exclude=(),
+                    num_threads=DEFAULT_THREADS):
     if interval > 0:
         updater = Updater(interval)
     else:
         updater = None
+
     if isinstance(exclude, str):
         exclude = [exclude]
     exclude = [x if isinstance(x, re._pattern_type)
                else re.compile(x) for x in exclude]
 
     pool = Pool(num_threads)
-    dirdata = DirHashData(folder, pool, updater=updater, exclude=exclude)
-    return dirdata
+    dirQueue = Queue()
+    topDirItem = DirQueueItem(folder, None)
+    dirQueue.put(topDirItem)
+
+    while True:
+        try:
+            nextDirItem = dirQueue.get_nowait()
+        except Empty:
+            if topDirItem.isDone():
+                break
+            else:
+                gevent.sleep(1)
+        else:
+            pool.spawn(DirHashData, nextDirItem, dirQueue, exclude=exclude)
+
+    return topDirItem.dirHashData
 
 
 def write_hashes(folder, output_txt, interval=DEFAULT_INTERVAL, exclude=(),
@@ -292,8 +373,8 @@ def write_hashes(folder, output_txt, interval=DEFAULT_INTERVAL, exclude=(),
 
     print(f"Crawling directory {folder}...")
     start = datetime.datetime.now()
-    dirdata = get_dirdata(folder, interval=interval, exclude=exclude,
-                          num_threads=num_threads)
+    dirdata = start_dir_crawl(folder, interval=interval, exclude=exclude,
+                              num_threads=num_threads)
     elapsed = datetime.datetime.now() - start
     print(f"Done crawling directory {folder}! (took {elapsed})")
 
